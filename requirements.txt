@@ -1,0 +1,7 @@
+langchain_core
+akshare
+google-genai
+python-dotenv
+backoff
+langgraph
+

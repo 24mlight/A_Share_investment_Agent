@@ -48,16 +48,26 @@ git clone https://github.com/24mlight/A_Share_investment_Agent.git
 cd A_Share_investment_Agent
 ```
 
-1. Install Poetry (if not already installed):
+If you want to use poetry to manage dependency:
+
+1a. Install Poetry (if not already installed):
 
 ```bash
 curl -sSL https://install.python-poetry.org | python3 -
 ```
 
-2. Install dependencies:
+2a. Install dependencies:
 
 ```bash
 poetry install
+```
+
+Or use pip to manage dependency:
+
+2b. install dependency:
+
+```bash
+pip install -r requirements.txt
 ```
 
 3. Set up your environment variables:
@@ -81,6 +91,8 @@ export GEMINI_MODEL='gemini-1.5-flash'
 
 ```bash
 poetry run python src/main.py --ticker 301155
+or
+python -m src.main --ticker 301155
 ```
 
 这将使用默认参数运行系统，包括：
