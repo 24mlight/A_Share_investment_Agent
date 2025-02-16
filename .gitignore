@@ -39,20 +39,23 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
 
 # Other common files to ignore
 node_modules/
 dist/
-.DS_Store 
+.DS_Store
 
 # New additions
 .venv/
 venv/
-ENV/ 
+ENV/
 
 # Reference directory
-reference/ 
+reference/
 
 # Documentation
-docs/ 
+docs/
+
+logs/
+src/data/
