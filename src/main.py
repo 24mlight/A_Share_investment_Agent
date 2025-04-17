@@ -33,7 +33,7 @@ from src.utils.llm_interaction_logger import (
 )
 from backend.dependencies import get_log_storage
 from backend.main import app as fastapi_app  # Import the FastAPI app
-
+import questionary
 
 # --- Initialize Logging ---
 
@@ -56,7 +56,7 @@ sys.stdout = OutputLogger()
 
 
 # --- Run the Hedge Fund Workflow ---
-def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, portfolio: dict, show_reasoning: bool = False, num_of_news: int = 5):
+def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, portfolio: dict, show_reasoning: bool = False, num_of_news: int = 5,agent_choices=None):
     print(f"--- Starting Workflow Run ID: {run_id} ---")
 
     # 设置backend的run_id
@@ -83,7 +83,11 @@ def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, por
         "metadata": {
             "show_reasoning": show_reasoning,
             "run_id": run_id,  # Pass run_id in metadata
-        }
+            "agents" : agent_choices
+        },
+
+        
+
     }
 
     # 使用backend的workflow_run上下文管理器（如果可用）
@@ -107,41 +111,100 @@ def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, por
     return final_state["messages"][-1].content
 
 
+
+ANALYST_ORDER = [
+
+    ("Technical Analyst", technical_analyst_agent),
+    ("Fundamentals Agent", fundamentals_agent),
+    ("Sentiment Agent", sentiment_agent),
+    ("Valuation Agent", valuation_agent),
+]
+
+# 使用 questionary 让用户选择 agents
+choices = questionary.checkbox(
+    "Select your AI analysts.",
+    choices=[questionary.Choice(display, value=value) for display, value in ANALYST_ORDER],
+    instruction="\n\nInstructions: \n1. Press Space to select/unselect analysts.\n2. Press 'a' to select/unselect all.\n3. Press Enter when done to run the hedge fund.\n",
+    validate=lambda x: len(x) > 0 or "You must select at least one analyst.",
+    style=questionary.Style(
+        [
+            ("checkbox-selected", "fg:green"),
+            ("selected", "fg:green noinherit"),
+            ("highlighted", "noinherit"),
+            ("pointer", "noinherit"),
+        ]
+    ),
+).ask()
+
+print(choices)
+# 打印用户选择的 agents
+print("\n您选择启用的 agents 是：")
+for agent in choices:
+    print(f"- {agent}")
+
+# 模拟动态添加到 workflow
+workflow = {}
+for agent in choices:
+    agent_name = agent.__name__ if hasattr(agent, '__name__') else str(agent)
+    workflow[agent] = f"{agent}_function"  # 假设每个 agent 有对应的函数
+
+
+
+
 # --- Define the Workflow Graph ---
 workflow = StateGraph(AgentState)
 
 # Add nodes - Remove explicit log_agent_execution calls
 # The @agent_endpoint decorator now handles logging to BaseLogStorage
+for agent in choices:
+    agent_name = agent.__name__ if hasattr(agent, '__name__') else str(agent)
+    workflow.add_node(agent_name, agent)
+
+
 workflow.add_node("market_data_agent", market_data_agent)
-workflow.add_node("technical_analyst_agent", technical_analyst_agent)
-workflow.add_node("fundamentals_agent", fundamentals_agent)
-workflow.add_node("sentiment_agent", sentiment_agent)
-workflow.add_node("valuation_agent", valuation_agent)
 workflow.add_node("researcher_bull_agent", researcher_bull_agent)
 workflow.add_node("researcher_bear_agent", researcher_bear_agent)
 workflow.add_node("debate_room_agent", debate_room_agent)
 workflow.add_node("risk_management_agent", risk_management_agent)
 workflow.add_node("portfolio_management_agent", portfolio_management_agent)
 
+
+
 # Define the workflow edges (remain unchanged)
 workflow.set_entry_point("market_data_agent")
 
+
 # Market Data to Analysts
-workflow.add_edge("market_data_agent", "technical_analyst_agent")
-workflow.add_edge("market_data_agent", "fundamentals_agent")
-workflow.add_edge("market_data_agent", "sentiment_agent")
-workflow.add_edge("market_data_agent", "valuation_agent")
+for analyst in choices:
+        analyst_name = analyst.__name__ if hasattr(analyst, '__name__') else str(analyst)
+        workflow.add_edge("market_data_agent", analyst_name)
+
+# workflow.add_edge("market_data_agent", "technical_analyst_agent")
+# workflow.add_edge("market_data_agent", "fundamentals_agent")
+# workflow.add_edge("market_data_agent", "sentiment_agent")
+# workflow.add_edge("market_data_agent", "valuation_agent")
+
 
 # Analysts to Researchers
-workflow.add_edge("technical_analyst_agent", "researcher_bull_agent")
-workflow.add_edge("fundamentals_agent", "researcher_bull_agent")
-workflow.add_edge("sentiment_agent", "researcher_bull_agent")
-workflow.add_edge("valuation_agent", "researcher_bull_agent")
+for analyst in choices:
+        analyst_name = analyst.__name__ if hasattr(analyst, '__name__') else str(analyst)
+        workflow.add_edge(analyst_name, "researcher_bull_agent")
 
-workflow.add_edge("technical_analyst_agent", "researcher_bear_agent")
-workflow.add_edge("fundamentals_agent", "researcher_bear_agent")
-workflow.add_edge("sentiment_agent", "researcher_bear_agent")
-workflow.add_edge("valuation_agent", "researcher_bear_agent")
+for analyst in choices:
+        analyst_name = analyst.__name__ if hasattr(analyst, '__name__') else str(analyst)
+        workflow.add_edge(analyst_name, "researcher_bear_agent")
+
+
+
+# workflow.add_edge("technical_analyst_agent", "researcher_bull_agent")
+# workflow.add_edge("fundamentals_agent", "researcher_bull_agent")
+# workflow.add_edge("sentiment_agent", "researcher_bull_agent")
+# workflow.add_edge("valuation_agent", "researcher_bull_agent")
+
+# workflow.add_edge("technical_analyst_agent", "researcher_bear_agent")
+# workflow.add_edge("fundamentals_agent", "researcher_bear_agent")
+# workflow.add_edge("sentiment_agent", "researcher_bear_agent")
+# workflow.add_edge("valuation_agent", "researcher_bear_agent")
 
 # Researchers to Debate Room
 workflow.add_edge("researcher_bull_agent", "debate_room_agent")
@@ -153,6 +216,16 @@ workflow.add_edge("debate_room_agent", "risk_management_agent")
 # Risk Management to Portfolio Management
 workflow.add_edge("risk_management_agent", "portfolio_management_agent")
 workflow.add_edge("portfolio_management_agent", END)
+
+# 打印 workflow 的节点和边
+print("\n--- Workflow Nodes ---")
+for node in workflow.nodes:
+    print(f"Node: {node}")
+
+print("\n--- Workflow Edges ---")
+for edge in workflow.edges:
+    print(f"Edge: {edge}")
+
 
 # Compile the workflow graph
 app = workflow.compile()
@@ -220,6 +293,15 @@ if __name__ == "__main__":
     # --- Execute Workflow ---
     # Generate run_id here when running directly
     main_run_id = str(uuid.uuid4())
+
+    print(choices)
+    print('######################')
+    agent_names=[]
+    for analyst in choices:
+        agent_names.append(analyst.__name__ if hasattr(analyst, '__name__') else str(analyst))
+
+    print(agent_names)
+
     result = run_hedge_fund(
         run_id=main_run_id,  # Pass the generated run_id
         ticker=args.ticker,
@@ -227,7 +309,8 @@ if __name__ == "__main__":
         end_date=end_date.strftime('%Y-%m-%d'),
         portfolio=portfolio,
         show_reasoning=args.show_reasoning,
-        num_of_news=args.num_of_news
+        num_of_news=args.num_of_news,
+        agent_choices=agent_names
     )
     print("\nFinal Result:")
     print(result)
