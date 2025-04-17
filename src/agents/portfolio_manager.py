@@ -14,23 +14,33 @@ def portfolio_management_agent(state: AgentState):
     show_workflow_status("Portfolio Manager")
     show_reasoning = state["metadata"]["show_reasoning"]
     portfolio = state["data"]["portfolio"]
+    agents=state["metadata"]["agents"]
+    
+# 动态获取消息
+    agent_messages = {}
+    for agent_name in agents:  # 遍历已选择的 agents
+        message = next(
+            (msg for msg in state["messages"] if msg.name == agent_name), None
+        )
+        if message:
+            agent_messages[agent_name] = message
 
-    # Get the technical analyst, fundamentals agent, and risk management agent messages
-    technical_message = next(
-        msg for msg in state["messages"] if msg.name == "technical_analyst_agent")
-    fundamentals_message = next(
-        msg for msg in state["messages"] if msg.name == "fundamentals_agent")
-    sentiment_message = next(
-        msg for msg in state["messages"] if msg.name == "sentiment_agent")
-    valuation_message = next(
-        msg for msg in state["messages"] if msg.name == "valuation_agent")
-    risk_message = next(
-        msg for msg in state["messages"] if msg.name == "risk_management_agent")
+    # 检查是否有足够的消息
+    if not agent_messages:
+        raise ValueError("No valid agent messages found in the state.")
+
+    # 解析消息内容
+    parsed_signals = {}
+    for agent_name, message in agent_messages.items():
+        try:
+            parsed_signals[agent_name] = json.loads(message.content)
+        except Exception as e:
+            parsed_signals[agent_name] = ast.literal_eval(message.content)
 
     # Create the system message
     system_message = {
         "role": "system",
-        "content": """You are a portfolio manager making final trading decisions.
+        "content": f"""You are a portfolio manager making final trading decisions.
             Your job is to make a trading decision based on the team's analysis while strictly adhering
             to risk management constraints.
 
@@ -40,22 +50,8 @@ def portfolio_management_agent(state: AgentState):
             - These are hard constraints that cannot be overridden by other signals
 
             When weighing the different signals for direction and timing:
-            1. Valuation Analysis (35% weight)
-               - Primary driver of fair value assessment
-               - Determines if price offers good entry/exit point
-            
-            2. Fundamental Analysis (30% weight)
-               - Business quality and growth assessment
-               - Determines conviction in long-term potential
-            
-            3. Technical Analysis (25% weight)
-               - Secondary confirmation
-               - Helps with entry/exit timing
-            
-            4. Sentiment Analysis (10% weight)
-               - Final consideration
-               - Can influence sizing within risk limits
-            
+            {generate_signal_weights(agents)}
+
             The decision process should be:
             1. First check risk management constraints
             2. Then evaluate valuation signal
@@ -79,27 +75,25 @@ def portfolio_management_agent(state: AgentState):
     }
 
     # Create the user message
+    user_message_content = "Based on the team's analysis below, make your trading decision.\n\n"
+    for agent_name, signal in parsed_signals.items():
+        user_message_content += f"{agent_name.replace('_', ' ').title()} Trading Signal: {signal}\n"
+
+    user_message_content += f"""
+    Here is the current portfolio:
+    Portfolio:
+    Cash: {portfolio['cash']:.2f}
+    Current Position: {portfolio['stock']} shares
+
+    Only include the action, quantity, reasoning, confidence, and agent_signals in your output as JSON. Do not include any JSON markdown.
+
+    Remember, the action must be either buy, sell, or hold.
+    You can only buy if you have available cash.
+    You can only sell if you have shares in the portfolio to sell."""
     user_message = {
-        "role": "user",
-        "content": f"""Based on the team's analysis below, make your trading decision.
-
-            Technical Analysis Trading Signal: {technical_message.content}
-            Fundamental Analysis Trading Signal: {fundamentals_message.content}
-            Sentiment Analysis Trading Signal: {sentiment_message.content}
-            Valuation Analysis Trading Signal: {valuation_message.content}
-            Risk Management Trading Signal: {risk_message.content}
-
-            Here is the current portfolio:
-            Portfolio:
-            Cash: {portfolio['cash']:.2f}
-            Current Position: {portfolio['stock']} shares
-
-            Only include the action, quantity, reasoning, confidence, and agent_signals in your output as JSON.  Do not include any JSON markdown.
-
-            Remember, the action must be either buy, sell, or hold.
-            You can only buy if you have available cash.
-            You can only sell if you have shares in the portfolio to sell."""
-    }
+            "role": "user",
+            "content": user_message_content
+        }
 
     # 记录LLM请求
     request_data = {
@@ -170,6 +164,16 @@ def portfolio_management_agent(state: AgentState):
         "data": state["data"],
         "metadata": state["metadata"],
     }
+
+def generate_signal_weights(agents):
+    """动态生成信号权重描述"""
+    weights = {
+        "valuation_agent": "Valuation Analysis (35% weight)",
+        "fundamentals_agent": "Fundamental Analysis (30% weight)",
+        "technical_analyst_agent": "Technical Analysis (25% weight)",
+        "sentiment_agent": "Sentiment Analysis (10% weight)"
+    }
+    return "\n".join([f"{weights[agent]}" for agent in agents if agent in weights])
 
 
 def format_decision(action: str, quantity: int, confidence: float, agent_signals: list, reasoning: str) -> dict:
